@@ -25,6 +25,7 @@ from typing import Iterable, Sequence
 
 import bpy
 from mathutils import Euler, Vector
+from mathutils import noise as bl_noise
 
 PROJECT_DIR = ""
 BLEND_PATH = ""
@@ -206,31 +207,85 @@ def ground(size: float = 40.0, name: str = "Ground") -> bpy.types.Object:
     return obj
 
 
+def smoothstep(edge0: float, edge1: float, x: float) -> float:
+    """Ease between two thresholds. Use it to blend paths and clearings."""
+    if edge1 == edge0:
+        return 0.0 if x < edge0 else 1.0
+    t = min(1.0, max(0.0, (x - edge0) / (edge1 - edge0)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def height_noise(x: float, y: float, scale: float = 0.012, octaves: int = 4, seed: int = 7) -> float:
+    """Smooth fractal hills in roughly -1..1. Build height fields out of this."""
+    off = seed * 17.13
+    return bl_noise.fractal(Vector((x * scale + off, y * scale + off, 0.0)), 1.0, 2.0, octaves)
+
+
 def terrain(
     name: str = "Terrain",
-    size: float = 48.0,
+    size=48.0,
     cuts: int = 32,
-    height: float = 3.0,
+    height=3.0,
     seed: int = 7,
     live_shift: float = 0.0,
+    rim_falloff: bool = True,
+    smooth: bool = True,
 ) -> bpy.types.Object:
-    obj = primitive("plane", name, "ENV", scale=(size / 2, size / 2, 1))
+    """Displaced ground plane.
+
+    size   — a number or (x, y) / (x, y, z) full extents in meters.
+    height — an amplitude in meters for smooth fractal hills, OR a callable
+             f(x, y) -> z for an authored height field. Use a callable to carve
+             paths, flatten clearings, and raise ridges:
+
+                 def land(x, y):
+                     h = height_noise(x, y, seed=7) * 6.0
+                     h *= smoothstep(2.0, 7.0, abs(x))   # flatten a path corridor at x=0
+                     return h
+
+             smoothstep returns 0 inside edge0 and 1 outside edge1, so multiplying
+             by it flattens the middle. Multiply by (1 - smoothstep) to do the
+             opposite and keep only the middle.
+
+                 terrain("Ridge", size=(200, 200), cuts=96, height=land)
+    """
+    sx, sy, _ = _size3(size)
+    obj = primitive("plane", name, "ENV", scale=(sx / 2, sy / 2, 1))
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.subdivide(number_cuts=cuts)
     bpy.ops.object.mode_set(mode="OBJECT")
-    rng = random.Random(seed)
     mesh = obj.data
+    authored = callable(height)
+    amplitude = 0.0 if authored else float(height)
     for v in mesh.vertices:
-        n = rng.uniform(-1, 1) + live_shift
-        falloff = 1.0 - min(1.0, Vector((v.co.x, v.co.y)).length / (size / 2 + 0.001))
-        v.co.z += n * height * falloff * 0.45
+        x, y = v.co.x, v.co.y
+        if authored:
+            v.co.z += float(height(x, y))
+            continue
+        z = height_noise(x + live_shift * 10.0, y, seed=seed) * amplitude
+        if rim_falloff:
+            edge = max(abs(x) / (sx / 2 + 1e-6), abs(y) / (sy / 2 + 1e-6))
+            z *= 1.0 - smoothstep(0.72, 1.0, edge)
+        v.co.z += z
     mesh.update()
+    if smooth:
+        for poly in mesh.polygons:
+            poly.use_smooth = True
     assign_mat(obj, pbr("TerrainMat", (0.16, 0.28, 0.14, 1), roughness=0.9))
     rigid(obj, "PASSIVE", "MESH")
     tag(obj, gcp_kind="terrain")
     return obj
+
+
+def sample_height(obj: bpy.types.Object, x: float, y: float) -> float:
+    """World-space ground height under (x, y). Use it to sit props on terrain."""
+    origin = Vector((x, y, 1000.0))
+    hit, location, _, _ = obj.ray_cast(obj.matrix_world.inverted() @ origin, Vector((0, 0, -1)))
+    if hit:
+        return (obj.matrix_world @ location).z
+    return 0.0
 
 
 def _frames2(frames, start: int = 1) -> tuple[int, int]:
@@ -398,6 +453,204 @@ def fog_volume(name: str, location, size, density: float = 0.02, color=(0.72, 0.
     assign_mat(obj, mat)
     obj.display_type = "WIRE"
     tag(obj, gcp_kind="fog")
+    return obj
+
+
+def _shade(color, factor: float):
+    r, g, b, a = _rgba(color)
+    return (min(1.0, r * factor), min(1.0, g * factor), min(1.0, b * factor), a)
+
+
+def noise_material(
+    name: str,
+    color=(0.3, 0.3, 0.3),
+    accent=None,
+    scale: float = 6.0,
+    roughness: float = 0.85,
+    bump: float = 0.25,
+    metallic: float = 0.0,
+):
+    """PBR with procedural colour break-up and bump.
+
+    Flat single-colour materials are what make a world read as untextured
+    plastic. Use this for ground, bark, rock, moss, plaster, snow.
+    """
+    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    for node in list(nt.nodes):
+        if node.type != "OUTPUT_MATERIAL":
+            nt.nodes.remove(node)
+    out = _output_node(nt, "OUTPUT_MATERIAL", "ShaderNodeOutputMaterial")
+    bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
+    bsdf.inputs["Roughness"].default_value = roughness
+    bsdf.inputs["Metallic"].default_value = metallic
+    tex = nt.nodes.new("ShaderNodeTexNoise")
+    tex.inputs["Scale"].default_value = scale
+    tex.inputs["Detail"].default_value = 8.0
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].position = 0.35
+    ramp.color_ramp.elements[1].position = 0.65
+    ramp.color_ramp.elements[0].color = _rgba(color)
+    ramp.color_ramp.elements[1].color = _rgba(accent) if accent else _shade(color, 1.45)
+    nt.links.new(tex.outputs["Fac"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+    if bump > 0:
+        bump_node = nt.nodes.new("ShaderNodeBump")
+        bump_node.inputs["Strength"].default_value = bump
+        nt.links.new(tex.outputs["Fac"], bump_node.inputs["Height"])
+        nt.links.new(bump_node.outputs["Normal"], bsdf.inputs["Normal"])
+    nt.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+    return mat
+
+
+def _join(objects, name: str, col: str):
+    objects = [o for o in objects if o is not None]
+    if not objects:
+        return None
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in objects:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = objects[0]
+    if len(objects) > 1:
+        bpy.ops.object.join()
+    joined = bpy.context.view_layer.objects.active
+    joined.name = name
+    bpy.ops.object.select_all(action="DESELECT")
+    return _link(joined, col)
+
+
+def rock(name: str, location, size=1.6, seed: int = 1, col: str = "PROPS", color=(0.29, 0.28, 0.26)):
+    """A displaced boulder. Beats a scaled sphere everywhere it is used."""
+    sx, sy, sz = _size3(size)
+    obj = primitive("ico", name, col, location=location, scale=(sx / 2, sy / 2, sz / 2))
+    rng = random.Random(seed)
+    jitter = Vector((rng.uniform(-40, 40), rng.uniform(-40, 40), rng.uniform(-40, 40)))
+    for v in obj.data.vertices:
+        amount = bl_noise.fractal(v.co * 1.8 + jitter, 1.0, 2.0, 3)
+        v.co += v.co.normalized() * amount * (max(sx, sy, sz) * 0.16)
+    obj.data.update()
+    obj.rotation_euler = Euler((rng.uniform(0, 0.4), rng.uniform(0, 0.4), rng.uniform(0, 6.28)))
+    assign_mat(obj, noise_material(f"M_Rock_{name}", color, scale=9.0, roughness=0.92, bump=0.4))
+    tag(obj, gcp_kind="rock")
+    return obj
+
+
+def pine(
+    name: str,
+    location,
+    height: float = 12.0,
+    seed: int = 1,
+    tiers: int = 6,
+    col: str = "PROPS",
+    trunk_color=(0.16, 0.11, 0.08),
+    needle_color=(0.08, 0.16, 0.10),
+):
+    """A conifer built from a tapered trunk and jittered canopy tiers, joined
+    into one object. Stacked identical cones are what make a forest look fake."""
+    rng = random.Random(seed)
+    x, y, z = location
+    trunk_h = height * 0.55
+    parts = []
+    trunk = primitive("cone", f"{name}_trunk", col, location=(x, y, z + trunk_h / 2), scale=(height * 0.035, height * 0.035, trunk_h / 2))
+    trunk.data.materials.clear()
+    assign_mat(trunk, noise_material("M_Bark", trunk_color, scale=22.0, roughness=0.95, bump=0.55))
+    parts.append(trunk)
+
+    needles = noise_material("M_Needle", needle_color, accent=_shade(needle_color, 1.7), scale=7.0, roughness=0.8, bump=0.3)
+    for tier in range(tiers):
+        t = tier / max(1, tiers - 1)
+        radius = height * 0.26 * (1.0 - t * 0.78) * rng.uniform(0.9, 1.1)
+        tier_h = height * 0.30 * (1.0 - t * 0.45)
+        cz = z + height * (0.32 + t * 0.60)
+        cone = primitive(
+            "cone",
+            f"{name}_c{tier}",
+            col,
+            location=(x + rng.uniform(-0.12, 0.12), y + rng.uniform(-0.12, 0.12), cz),
+            scale=(radius, radius, tier_h),
+        )
+        cone.rotation_euler = Euler((rng.uniform(-0.03, 0.03), rng.uniform(-0.03, 0.03), rng.uniform(0, 6.28)))
+        assign_mat(cone, needles)
+        parts.append(cone)
+
+    tree = _join(parts, name, col)
+    tree.rotation_euler = Euler((rng.uniform(-0.04, 0.04), rng.uniform(-0.04, 0.04), rng.uniform(0, 6.28)))
+    tag(tree, gcp_kind="tree")
+    return tree
+
+
+def scatter_on(ground: bpy.types.Object, factory, count: int, region, seed: int = 1, reject=None, tries: int = 12):
+    """Place props ON the terrain surface.
+
+    factory(index, x, y, z, rng) -> object. reject(x, y) -> True to skip a spot,
+    which is how you keep a path, clearing, or building footprint clear.
+    """
+    rng = random.Random(seed)
+    x0, y0, x1, y1 = region
+    made = []
+    for i in range(count):
+        for _ in range(tries):
+            px = rng.uniform(x0, x1)
+            py = rng.uniform(y0, y1)
+            if reject and reject(px, py):
+                continue
+            pz = sample_height(ground, px, py)
+            obj = factory(i, px, py, pz, rng)
+            if obj is not None:
+                made.append(obj)
+            break
+    return made
+
+
+def clear_zone(location, radius: float, collections=("PROPS",)) -> int:
+    """Delete scattered props inside a radius.
+
+    Scatter first, then clear camera lanes, doorways, and spawn pads. A tree
+    dropped on the beauty camera renders as a wall of foliage.
+    """
+    cx, cy = location[0], location[1]
+    removed = 0
+    for obj in list(bpy.data.objects):
+        if obj.type != "MESH":
+            continue
+        if collections and not any(c.name in collections for c in obj.users_collection):
+            continue
+        if math.hypot(obj.location.x - cx, obj.location.y - cy) <= radius:
+            bpy.data.objects.remove(obj, do_unlink=True)
+            removed += 1
+    return removed
+
+
+def clear_camera_lane(cam: bpy.types.Object, radius: float = 6.0, collections=("PROPS",)) -> int:
+    """Clear props sitting on top of a camera. Call it after scattering."""
+    return clear_zone((cam.location.x, cam.location.y), radius, collections)
+
+
+def bevel(obj: bpy.types.Object, width: float = 0.03, segments: int = 2):
+    """Catch a highlight on every edge. Raw boxes read as untextured blockout."""
+    mod = obj.modifiers.new("GCP_Bevel", "BEVEL")
+    mod.width = width
+    mod.segments = segments
+    mod.limit_method = "ANGLE"
+    return obj
+
+
+def smooth_subdiv(obj: bpy.types.Object, levels: int = 1):
+    mod = obj.modifiers.new("GCP_Subdiv", "SUBSURF")
+    mod.levels = levels
+    mod.render_levels = levels
+    for poly in obj.data.polygons:
+        poly.use_smooth = True
+    return obj
+
+
+def displace_surface(obj: bpy.types.Object, strength: float = 0.3, scale: float = 1.2, seed: int = 1):
+    tex = bpy.data.textures.new(f"{obj.name}_disp", "CLOUDS")
+    tex.noise_scale = scale
+    mod = obj.modifiers.new("GCP_Displace", "DISPLACE")
+    mod.texture = tex
+    mod.strength = strength
     return obj
 
 

@@ -12,6 +12,7 @@ export type AgentEvent =
   | { type: 'tool_start'; name: string; arguments: string }
   | { type: 'tool_end'; name: string; result: string }
   | { type: 'preview'; path: string }
+  | { type: 'model'; path: string }
   | { type: 'scene'; scene: unknown }
   | { type: 'error'; text: string }
   | { type: 'done'; summary?: string }
@@ -127,6 +128,9 @@ export async function runAgent(options: {
         })
         if (executed.previewPath) {
           emit(options.window, options.worldId, { type: 'preview', path: executed.previewPath })
+        }
+        if (executed.glbPath) {
+          emit(options.window, options.worldId, { type: 'model', path: executed.glbPath })
         }
         if (executed.scene) {
           emit(options.window, options.worldId, { type: 'scene', scene: executed.scene })

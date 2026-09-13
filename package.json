@@ -14,8 +14,10 @@
     "dist:win": "npm run build && electron-builder --win --config"
   },
   "dependencies": {
+    "@types/three": "^0.186.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "three": "^0.186.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

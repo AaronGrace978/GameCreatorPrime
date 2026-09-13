@@ -18,7 +18,7 @@ export interface BlenderRunResult {
   scene?: unknown
 }
 
-function runtimeDir() {
+export function runtimeDir() {
   return app.isPackaged
     ? join(process.resourcesPath, 'blender', 'runtime')
     : join(app.getAppPath(), 'blender', 'runtime')
@@ -107,6 +107,10 @@ if bpy.context.scene.camera is None:
     camera("AutoCam", (14, -16, 8), look_at=(0, 0, 1.2), kind="beauty")
 save_blend()
 write_inspect_json()
+try:
+    print("GCP_GLB:" + export_glb("world.glb"))
+except Exception as exc:
+    print("GCP_GLB_FAILED:" + str(exc))
 `
 }
 
@@ -151,9 +155,12 @@ export async function runWorldScript(options: {
   }
 
   const inspect = parseScene(result.stdout)
+  const glbPath = join(folder, 'exports', 'world.glb')
+  const glb = existsSync(glbPath) ? glbPath : undefined
   updateWorld(options.worldId, {
     status: result.ok ? 'ready' : 'error',
     blendPath: existsSync(blendPath) ? blendPath : undefined,
+    glbPath: glb,
     previewPath,
     lastError: result.ok ? undefined : result.stderr.slice(-1200)
   })
@@ -161,6 +168,7 @@ export async function runWorldScript(options: {
   return {
     ...result,
     previewPath,
+    glbPath: glb,
     blendPath: existsSync(blendPath) ? blendPath : undefined,
     scene: inspect
   }

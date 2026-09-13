@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { inspectWorld, renderWorld, runWorldScript } from '../blender'
+import { inspectWorld, renderWorld, runtimeDir, runWorldScript } from '../blender'
 import { getWorld, listWorldFiles, updateWorld, worldFolder } from '../projects'
 import type { ToolSpec } from '../providers/client'
 
@@ -58,6 +58,18 @@ export const AGENT_TOOLS: ToolSpec[] = [
     parameters: { type: 'object', additionalProperties: false, properties: {} }
   },
   {
+    name: 'sdk_reference',
+    description:
+      'Exact signatures and docstrings for every gcp helper. Call this instead of guessing an argument, especially after a TypeError.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string', description: 'Optional helper name to show in full, e.g. terrain' }
+      }
+    }
+  },
+  {
     name: 'finish_world',
     description: 'Mark the job complete. Summarize what a game, robotics trainer, or director should do next.',
     parameters: {
@@ -78,11 +90,70 @@ export interface ToolContext {
   lastScript?: { filename: string; code: string }
 }
 
+interface SdkEntry {
+  name: string
+  signature: string
+  doc: string
+}
+
+/** Parse public defs out of the SDK so the agent reads real signatures, not the prompt's summary. */
+function parseSdk(): SdkEntry[] {
+  const source = readFileSync(join(runtimeDir(), 'gcp.py'), 'utf8')
+  const lines = source.split(/\r?\n/)
+  const entries: SdkEntry[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = /^def ([A-Za-z]\w*)\(/.exec(lines[i])
+    if (!match) continue
+
+    let signature = lines[i]
+    let depth = 0
+    let cursor = i
+    do {
+      for (const ch of lines[cursor]) {
+        if (ch === '(') depth++
+        else if (ch === ')') depth--
+      }
+      if (depth > 0) signature += '\n' + lines[++cursor]
+    } while (depth > 0 && cursor < lines.length - 1)
+
+    let doc = ''
+    const first = (lines[cursor + 1] ?? '').trim()
+    if (first.startsWith('"""')) {
+      const body = [first.slice(3)]
+      if (!first.endsWith('"""') || first.length < 6) {
+        for (let d = cursor + 2; d < lines.length; d++) {
+          if (lines[d].trim().endsWith('"""')) {
+            body.push(lines[d].trim().replace(/"""$/, ''))
+            break
+          }
+          body.push(lines[d])
+        }
+      }
+      doc = body.join('\n').replace(/"""$/, '').trim()
+    }
+
+    entries.push({
+      name: match[1],
+      signature: signature.replace(/:\s*$/, '').replace(/\s+/g, ' ').trim(),
+      doc
+    })
+    i = cursor
+  }
+  return entries
+}
+
 export async function executeTool(
   name: string,
   rawArgs: string,
   ctx: ToolContext
-): Promise<{ result: string; previewPath?: string; scene?: unknown; finished?: { summary: string } }> {
+): Promise<{
+  result: string
+  previewPath?: string
+  glbPath?: string
+  scene?: unknown
+  finished?: { summary: string }
+}> {
   let args: Record<string, unknown> = {}
   try {
     args = JSON.parse(rawArgs || '{}') as Record<string, unknown>
@@ -132,6 +203,7 @@ export async function executeTool(
         return {
           result: `Blender ok in ${ran.durationMs}ms\n${JSON.stringify(summary, null, 2)}`,
           previewPath: ran.previewPath,
+          glbPath: ran.glbPath,
           scene: ran.scene
         }
       } catch (err) {
@@ -173,6 +245,26 @@ export async function executeTool(
     }
     case 'list_project_files': {
       return { result: listWorldFiles(ctx.worldId).join('\n') || '(empty)' }
+    }
+    case 'sdk_reference': {
+      try {
+        const entries = parseSdk()
+        const wanted = args.name ? String(args.name) : ''
+        if (wanted) {
+          const hit = entries.find((e) => e.name === wanted)
+          if (!hit) {
+            return { result: `No helper named ${wanted}. Available: ${entries.map((e) => e.name).join(', ')}` }
+          }
+          return { result: `${hit.signature}\n${hit.doc || '(no docstring)'}` }
+        }
+        return {
+          result: entries
+            .map((e) => (e.doc ? `${e.signature}\n    ${e.doc.split('\n')[0]}` : e.signature))
+            .join('\n')
+        }
+      } catch (err) {
+        return { result: err instanceof Error ? err.message : String(err) }
+      }
     }
     case 'finish_world': {
       const summary = String(args.summary || '')

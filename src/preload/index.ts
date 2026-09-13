@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 export type AgentPayload = {
   worldId: string
-  type: 'status' | 'text' | 'tool_start' | 'tool_end' | 'preview' | 'scene' | 'error' | 'done'
+  type: 'status' | 'text' | 'tool_start' | 'tool_end' | 'preview' | 'model' | 'scene' | 'error' | 'done'
   text?: string
   name?: string
   arguments?: string

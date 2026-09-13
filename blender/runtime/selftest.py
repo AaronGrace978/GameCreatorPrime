@@ -17,6 +17,17 @@ import bpy  # noqa: E402
 from gcp import (  # noqa: E402
     area_light,
     assign_mat,
+    bevel,
+    clear_zone,
+    displace_surface,
+    height_noise,
+    noise_material,
+    pine,
+    rock,
+    sample_height,
+    scatter_on,
+    smooth_subdiv,
+    smoothstep,
     bake_physics,
     building_block,
     camera,
@@ -97,6 +108,19 @@ def main():
     print("geometry")
     step("ground", lambda: ground(60))
     terr = step("terrain", lambda: terrain("Terrain", size=80, cuts=24, height=4, seed=7))
+    step("terrain/tuple size", lambda: terrain("TerrainRect", size=(60, 40), cuts=12, height=3, seed=2))
+    step(
+        "terrain/callable height field",
+        lambda: terrain(
+            "TerrainField",
+            size=(50, 50),
+            cuts=16,
+            height=lambda x, y: height_noise(x, y, seed=4) * 5.0 * smoothstep(4.0, 12.0, abs(x)),
+        ),
+    )
+    step("height_noise", lambda: height_noise(3.0, 4.0, seed=7))
+    step("smoothstep", lambda: smoothstep(0.0, 1.0, 0.5))
+    step("sample_height", lambda: sample_height(bpy.data.objects["Terrain"], 2.0, 2.0))
     step("primitive/cube", lambda: primitive("cube", "Cube_A", "PROPS", (2, 2, 1)))
     step("primitive/cylinder", lambda: primitive("cylinder", "Trunk_A", "PROPS", (3, 3, 1)))
     step("primitive/cone", lambda: primitive("cone", "Canopy_A", "PROPS", (3, 3, 3)))
@@ -109,6 +133,26 @@ def main():
     step("pbr/rgba", lambda: pbr("M_RGBA", (0.2, 0.3, 0.1, 1), 0.9, 0.0, (0.0, 0.0, 0.0, 1), 0.0))
     step("pbr/rgb", lambda: pbr("M_RGB", (0.13, 0.19, 0.11), 0.95, 0.0, (0.02, 0.03, 0.02), 0.15))
     step("assign_mat", lambda: assign_mat(bpy.data.objects["Cube_A"], pbr("M_Cube", (0.5, 0.5, 0.5))))
+    step("noise_material", lambda: noise_material("M_Noise", (0.3, 0.25, 0.2), accent=(0.5, 0.4, 0.3)))
+
+    print("procedural props")
+    step("rock", lambda: rock("Boulder", (-8, -6, 0.6), size=2.4, seed=3))
+    step("pine", lambda: pine("Pine_Hero", (-14, 4, 0), height=13.0, seed=5))
+    step(
+        "scatter_on",
+        lambda: scatter_on(
+            bpy.data.objects["Terrain"],
+            lambda i, x, y, z, r: rock(f"ScatterRock_{i:02d}", (x, y, z), size=r.uniform(0.5, 1.5), seed=i),
+            6,
+            (-30, -30, 30, 30),
+            seed=11,
+            reject=lambda x, y: abs(x) < 4,
+        ),
+    )
+    step("bevel", lambda: bevel(bpy.data.objects["Wall_A"], 0.05, 2))
+    step("smooth_subdiv", lambda: smooth_subdiv(bpy.data.objects["Rock_A"], 1))
+    step("displace_surface", lambda: displace_surface(bpy.data.objects["Canopy_A"], 0.2, 1.0))
+    step("clear_zone", lambda: clear_zone((-14, 4), 2.0, ("NOPE",)))
 
     print("physics")
     step("rigid/active", lambda: rigid(bpy.data.objects["Cube_A"], "ACTIVE", "BOX", 4.0))
@@ -179,6 +223,36 @@ def main():
         "terrain is actually displaced",
         terr_obj is not None and len({round(v.co.z, 3) for v in terr_obj.data.vertices}) > 1,
         "every terrain vertex is at the same height",
+    )
+    rect = bpy.data.objects.get("TerrainRect")
+    check(
+        "tuple size gives a rectangular terrain",
+        rect is not None and abs(rect.dimensions.x - 60) < 2 and abs(rect.dimensions.y - 40) < 2,
+        f"dimensions {tuple(round(d, 1) for d in rect.dimensions) if rect else None}",
+    )
+    field = bpy.data.objects.get("TerrainField")
+    center_flat = field is not None and max(abs(v.co.z) for v in field.data.vertices if abs(v.co.x) < 3) < 1.0
+    check(
+        "callable height field carves where it is told",
+        center_flat,
+        "the authored corridor was not flattened",
+    )
+    tree = bpy.data.objects.get("Pine_Hero")
+    check(
+        "pine joins into a single object",
+        tree is not None and len(tree.data.polygons) > 100,
+        f"polygons {len(tree.data.polygons) if tree else None}",
+    )
+    boulder = bpy.data.objects.get("Boulder")
+    check(
+        "rock is displaced, not a smooth sphere",
+        boulder is not None and len({round(v.co.length, 2) for v in boulder.data.vertices}) > 4,
+        "every vertex is the same distance from centre",
+    )
+    check(
+        "scatter_on respects the reject region",
+        all(abs(o.location.x) >= 4 for o in bpy.data.objects if o.name.startswith("ScatterRock_")),
+        "a prop landed inside the rejected strip",
     )
     check(
         "spawn markers carry director prompts",

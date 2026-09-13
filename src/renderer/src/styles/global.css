@@ -386,10 +386,56 @@ button { cursor: pointer; }
   color: var(--text);
   margin: 0 0 8px;
 }
+.viewport3d {
+  position: absolute;
+  inset: 0;
+}
+.viewport3d-canvas {
+  width: 100%;
+  height: 100%;
+}
+.viewport3d-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+.viewport3d-canvas canvas:active { cursor: grabbing; }
+.viewport3d-note {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+.viewport3d-reframe {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+.view-toggle {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 999px;
+  padding: 4px;
+  backdrop-filter: blur(8px);
+}
+.view-toggle .chip:disabled { opacity: 0.35; cursor: not-allowed; }
+
 .badge {
   position: absolute;
   top: 14px;
   left: 14px;
+  z-index: 3;
   padding: 6px 10px;
   border-radius: 999px;
   background: rgba(0,0,0,0.45);

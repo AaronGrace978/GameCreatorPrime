@@ -15,8 +15,23 @@ Argument conventions:
 Collections (use them):
   ENV, PROPS, ACTORS, PHYSICS, NAV, SPAWN, LIGHTS, CAMERAS, ANIM, GAMEPLAY
 
+This list is a summary. sdk_reference gives you the exact signatures — call it
+before you guess an argument, and always after a TypeError.
+
 Core helpers:
-  ground(size), terrain(name, size, cuts, height, seed, live_shift)
+  ground(size)
+  terrain(name, size, cuts, height, seed, rim_falloff, smooth)
+    height is an amplitude OR a callable f(x, y) -> z for an authored height field.
+    Build real landforms with it instead of scattering noise:
+      def land(x, y):
+          h = height_noise(x, y, seed=7) * 6.0
+          h *= smoothstep(2.0, 7.0, abs(x))   # flatten a path corridor at x=0
+          return h
+      terrain("Ridge", size=(200, 200), cuts=96, height=land)
+  height_noise(x, y, scale, octaves, seed) -> -1..1 smooth fractal
+  smoothstep(edge0, edge1, x) -> 0 inside edge0, 1 outside edge1.
+    Multiply height by it to flatten the middle; by (1 - it) to keep only the middle.
+  sample_height(terrain_obj, x, y) -> ground z, so props sit on the land
   primitive(kind, name, col, location, scale)  kind: cube|plane|uv_sphere|ico|cylinder|cone|capsule
   pbr(name, color_rgba, roughness, metallic, emission, emission_strength)
   assign_mat(obj, mat)

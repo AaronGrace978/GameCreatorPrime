@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { STUDIO_MODES, type StudioMode, modeMeta } from '@shared/modes'
+import WorldViewport from './WorldViewport'
 
 type View = 'home' | 'studio' | 'settings'
 
@@ -10,6 +11,7 @@ type World = {
   mode: StudioMode
   status: string
   previewPath?: string
+  glbPath?: string
   lastError?: string
 }
 
@@ -54,6 +56,8 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('Ready')
   const [preview, setPreview] = useState('')
+  const [model, setModel] = useState('')
+  const [view3d, setView3d] = useState(true)
   const [scene, setScene] = useState<SceneDump | null>(null)
   const [livePrompt, setLivePrompt] = useState('')
   const [listening, setListening] = useState(false)
@@ -104,6 +108,10 @@ export default function App() {
         ])
       }
       if (event.type === 'preview' && event.path) setPreview(window.gcp.toPreviewUrl(event.path))
+      if (event.type === 'model' && event.path) {
+        // Bust the cache so a rebuilt world replaces the mesh already on screen.
+        setModel(`${window.gcp.toPreviewUrl(event.path)}&v=${Date.now()}`)
+      }
       if (event.type === 'scene') setScene(event.scene as SceneDump)
       if (event.type === 'error' && event.text) {
         setLogs((curr) => [...curr, { id: crypto.randomUUID(), kind: 'error', text: event.text || '' }])
@@ -151,6 +159,7 @@ export default function App() {
       setWorld(created)
       setLogs([{ id: crypto.randomUUID(), kind: 'user', text: prompt.trim() }])
       setPreview('')
+      setModel('')
       setScene(null)
       setView('studio')
       setStatus('Starting agent…')
@@ -165,6 +174,7 @@ export default function App() {
     setWorld(next)
     setLogs([{ id: crypto.randomUUID(), kind: 'status', text: `Opened ${next.title}` }])
     setPreview(window.gcp.toPreviewUrl(next.previewPath))
+    setModel(next.glbPath ? window.gcp.toPreviewUrl(next.glbPath) : '')
     setView('studio')
     setMode(next.mode || 'generative')
   }
@@ -347,12 +357,32 @@ export default function App() {
               </div>
               <div className="viewport">
                 <div className="badge">{world.mode} · {world.status}</div>
-                {preview ? (
+                {(model || preview) && (
+                  <div className="view-toggle">
+                    <button
+                      className={`chip ${view3d && model ? 'active' : ''}`}
+                      disabled={!model}
+                      onClick={() => setView3d(true)}
+                    >
+                      3D
+                    </button>
+                    <button
+                      className={`chip ${!view3d || !model ? 'active' : ''}`}
+                      disabled={!preview}
+                      onClick={() => setView3d(false)}
+                    >
+                      Still
+                    </button>
+                  </div>
+                )}
+                {view3d && model ? (
+                  <WorldViewport src={model} onError={setStatus} />
+                ) : preview ? (
                   <img src={preview} alt="World preview" />
                 ) : (
                   <div className="empty">
                     <h2>The stage is dark.</h2>
-                    <p>The agent is writing Blender Python and will light this viewport when a still lands.</p>
+                    <p>The agent is writing Blender Python and will light this viewport when the world lands.</p>
                   </div>
                 )}
               </div>
