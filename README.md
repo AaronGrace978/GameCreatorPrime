@@ -1,5 +1,7 @@
 # GameCreator Prime
 
+![GameCreator Prime — AI world studio](docs/gamecreator-prime-hero.png)
+
 Premium, free-to-ship **AI world studio**. An agent harness drives [Blender](https://www.blender.org/) through Python — the same class of work as a 3D world generator, built so you can run it locally with **Ollama Cloud** or any other model provider.
 
 It is a game-design tool first. Cinematics are part of that, not a separate film-only toy.
