@@ -1,5 +1,6 @@
 appId: prime.gamecreator.studio
 productName: GameCreator Prime
+copyright: Copyright © 2026 Aaron Grace. All rights reserved.
 directories:
   buildResources: build
   output: release

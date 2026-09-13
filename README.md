@@ -56,4 +56,8 @@ npm run dist:win
 
 ## License
 
-MIT. Ship it free, sell a hosted tier, or both.
+**Copyright © 2026 Aaron Grace. All rights reserved.**
+
+GameCreator Prime is proprietary. No MIT (or other) public license is granted. You may not copy, fork, redistribute, sell, or make derivative works without a written grant from Aaron Grace. See [LICENSE](LICENSE).
+
+Massachusetts law and U.S. federal copyright apply. Unauthorized copying may be pursued in the U.S. District Court for the District of Massachusetts.

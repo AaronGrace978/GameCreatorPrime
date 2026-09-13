@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "Premium AI world studio — embodiment, live generative play, and game/cinematic direction in Blender.",
   "main": "./out/main/index.js",
-  "author": "GameCreator Prime",
-  "license": "MIT",
+  "author": "Aaron Grace",
+  "license": "UNLICENSED",
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
