@@ -1,0 +1,23 @@
+appId: prime.gamecreator.studio
+productName: GameCreator Prime
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: blender
+    to: blender
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-setup.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: GameCreator Prime
+mac:
+  target: dmg
+linux:
+  target: AppImage

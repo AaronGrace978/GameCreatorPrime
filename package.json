@@ -1,0 +1,31 @@
+{
+  "name": "gamecreator-prime",
+  "version": "1.0.0",
+  "description": "Premium AI world studio — embodiment, live generative play, and game/cinematic direction in Blender.",
+  "main": "./out/main/index.js",
+  "author": "GameCreator Prime",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "dist": "npm run build && electron-builder --config",
+    "dist:win": "npm run build && electron-builder --win --config"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "electron": "^37.3.1",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}
