@@ -41,8 +41,9 @@ button { cursor: pointer; }
 
 .app {
   height: 100%;
+  overflow: hidden;
   display: grid;
-  grid-template-rows: env(titlebar-area-height, 40px) 1fr 28px;
+  grid-template-rows: env(titlebar-area-height, 40px) minmax(0, 1fr) 28px;
   background:
     radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 55%),
     radial-gradient(900px 500px at -10% 110%, rgba(110, 231, 216, 0.08), transparent 50%),
@@ -138,12 +139,25 @@ button { cursor: pointer; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
   padding: 0 16px;
   font-size: 11px;
   color: var(--faint);
   border-top: 1px solid var(--line);
   background: #07070a;
+  z-index: 6;
 }
+.status-msg,
+.status-stack {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-msg { flex: 1; }
+.status-stack { flex: 0 1 auto; max-width: 46%; }
 
 .home {
   max-width: 1180px;
@@ -318,7 +332,12 @@ button { cursor: pointer; }
   padding: 12px;
   border-top: 1px solid var(--line);
   display: flex;
+  align-items: stretch;
   gap: 8px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  background: var(--panel-solid);
 }
 .livebar textarea, .field input, .field select, .settings input, .settings select {
   width: 100%;
@@ -328,7 +347,13 @@ button { cursor: pointer; }
   padding: 10px 12px;
   outline: none;
 }
-.livebar textarea { min-height: 58px; resize: none; }
+.livebar textarea {
+  min-height: 64px;
+  max-height: 64px;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.4;
+}
 
 .viewport {
   flex: 1;

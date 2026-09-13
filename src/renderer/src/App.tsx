@@ -315,10 +315,10 @@ export default function App() {
                   value={livePrompt}
                   placeholder={
                     world.mode === 'generative'
-                      ? 'Speak as the player standing inside… “raise a tower ahead, spawn two sentries.”'
+                      ? 'Live prompt: raise a tower, spawn two sentries…'
                       : world.mode === 'embodiment'
-                        ? 'Train the body… “add stairs, a graspable mug, and a closed waypoint loop.”'
-                        : 'Direct the sequence… “dolly in, add a rim array, hand off to follow cam.”'
+                        ? 'Live prompt: add stairs, a mug, a waypoint loop…'
+                        : 'Live prompt: dolly in, rim lights, follow cam…'
                   }
                   onChange={(e) => setLivePrompt(e.target.value)}
                   onKeyDown={(e) => {
@@ -397,8 +397,12 @@ export default function App() {
         )}
       </main>
       <footer className="status">
-        <span>{status}</span>
-        <span>Ollama Cloud · OpenAI · Anthropic · Gemini · Groq · OpenRouter · Local</span>
+        <span className="status-msg" title={status}>
+          {status}
+        </span>
+        <span className="status-stack" title="Ollama Cloud · OpenAI · Anthropic · Gemini · Groq · OpenRouter · Local">
+          Ollama Cloud · OpenAI · Anthropic · Gemini · Groq · OpenRouter · Local
+        </span>
       </footer>
     </div>
   )
