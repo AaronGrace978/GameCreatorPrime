@@ -55,6 +55,26 @@ def open_or_reset(live: bool = False) -> None:
     reset_scene()
 
 
+def _available_engines(scene) -> list[str]:
+    try:
+        return [item.identifier for item in scene.render.bl_rna.properties["engine"].enum_items]
+    except Exception:
+        return []
+
+
+def _set_render_engine(scene) -> None:
+    """Blender 4.2 used BLENDER_EEVEE_NEXT; 5.x LTS restored BLENDER_EEVEE."""
+    available = _available_engines(scene)
+    for candidate in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "EEVEE", "BLENDER_WORKBENCH", "CYCLES"):
+        if available and candidate not in available:
+            continue
+        try:
+            scene.render.engine = candidate
+            return
+        except Exception:
+            continue
+
+
 def reset_scene() -> None:
     try:
         bpy.ops.wm.read_homefile(use_empty=True)
@@ -64,11 +84,7 @@ def reset_scene() -> None:
     scene = bpy.context.scene
     scene.unit_settings.system = "METRIC"
     scene.unit_settings.scale_length = 1.0
-    scene.render.engine = "BLENDER_EEVEE_NEXT" if hasattr(bpy.types, "Scene") else "BLENDER_EEVEE"
-    try:
-        scene.render.engine = "BLENDER_EEVEE_NEXT"
-    except Exception:
-        scene.render.engine = "EEVEE"
+    _set_render_engine(scene)
     scene.render.resolution_x = 1920
     scene.render.resolution_y = 1080
     scene.render.fps = 24

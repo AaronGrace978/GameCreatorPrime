@@ -253,9 +253,10 @@ function execBlender(
     child.stderr.on('data', (d) => (stderr += d.toString()))
     child.on('error', reject)
     child.on('close', (code) => {
+      const crashed = /Traceback \(most recent call last\)/.test(stderr) || /Traceback \(most recent call last\)/.test(stdout)
       resolve({
-        ok: code === 0,
-        code: code ?? 1,
+        ok: code === 0 && !crashed,
+        code: crashed && !code ? 1 : (code ?? 1),
         stdout,
         stderr,
         durationMs: Date.now() - started
