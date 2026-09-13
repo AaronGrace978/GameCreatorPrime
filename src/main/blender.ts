@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { spawn } from 'node:child_process'
-import { existsSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { loadSettings, saveSettings } from './settings'
@@ -154,6 +154,7 @@ export async function runWorldScript(options: {
     previewPath = rendered?.previewPath
   }
 
+  writeRunLog(folder, filename, result)
   const inspect = parseScene(result.stdout)
   const glbPath = join(folder, 'exports', 'world.glb')
   const glb = existsSync(glbPath) ? glbPath : undefined
@@ -274,6 +275,28 @@ export_glb("world.glb")
   const made = existsSync(glbPath) ? glbPath : undefined
   if (made) updateWorld(worldId, { glbPath: made })
   return { ...result, glbPath: made, blendPath }
+}
+
+/** read_project_file advertises logs, so a run has to actually leave one behind. */
+function writeRunLog(folder: string, script: string, result: BlenderRunResult) {
+  const stamp = new Date().toISOString()
+  const body = [
+    `# ${stamp}  ${script}`,
+    `exit=${result.code} ok=${result.ok} durationMs=${result.durationMs}`,
+    '',
+    '## stderr',
+    result.stderr.trim() || '(none)',
+    '',
+    '## stdout',
+    result.stdout.trim() || '(none)',
+    ''
+  ].join('\n')
+  try {
+    mkdirSync(join(folder, 'logs'), { recursive: true })
+    writeFileSync(join(folder, 'logs', 'run.log'), body, 'utf8')
+  } catch {
+    // A missing log must never fail the build.
+  }
 }
 
 function parseScene(stdout: string) {
