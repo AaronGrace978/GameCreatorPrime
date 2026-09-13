@@ -176,7 +176,26 @@ export default function App() {
     setPreview(window.gcp.toPreviewUrl(next.previewPath))
     setModel(next.glbPath ? window.gcp.toPreviewUrl(next.glbPath) : '')
     setView('studio')
+    setView3d(true)
     setMode(next.mode || 'generative')
+    if (!next.glbPath) await buildModel(next.id)
+  }
+
+  /** Worlds built before GLB export, or after a live mutate, need one made from the .blend. */
+  async function buildModel(worldId: string, force = false) {
+    setStatus('Exporting 3D world…')
+    try {
+      const out = await window.gcp.blender.exportGlb(worldId, force)
+      if (out?.glbPath) {
+        setModel(`${window.gcp.toPreviewUrl(out.glbPath)}&v=${Date.now()}`)
+        setView3d(true)
+        setStatus('3D world ready')
+      } else {
+        setStatus('No GLB was produced. Build the world first.')
+      }
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    }
   }
 
   async function sendLive() {
@@ -351,9 +370,14 @@ export default function App() {
             <section className="col" style={{ borderRight: 0 }}>
               <div className="col-head">
                 <h3>{modeMeta(world.mode).title}</h3>
-                <button className="ghost" onClick={() => window.gcp.worlds.openFolder(world.id)}>
-                  Folder
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="ghost" onClick={() => buildModel(world.id, true)}>
+                    Rebuild 3D
+                  </button>
+                  <button className="ghost" onClick={() => window.gcp.worlds.openFolder(world.id)}>
+                    Folder
+                  </button>
+                </div>
               </div>
               <div className="viewport">
                 <div className="badge">{world.mode} · {world.status}</div>

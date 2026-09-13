@@ -1020,9 +1020,151 @@ def render_still(filename: str = "preview.png", frame: int = 1) -> str:
     return path
 
 
+def _principled_of(mat):
+    if not mat or not mat.use_nodes:
+        return None, None
+    nt = mat.node_tree
+    return nt, next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
+
+
+def bake_textures(
+    objects=None,
+    size: int = 512,
+    samples: int = 4,
+    bake_normal: bool = False,
+    margin: int = 4,
+) -> list:
+    """Bake procedural materials down to image textures.
+
+    glTF cannot carry a node graph, so an unbaked world exports with flat base
+    colours and loses all the noise and bump. This renders each object's
+    material into an image, rewires Base Color to that image, and packs it so
+    export_glb() embeds it.
+
+    Baking runs in Cycles and is per-object, so it is slow. Pass the hero
+    objects rather than an entire forest.
+    """
+    scene = bpy.context.scene
+    targets = [o for o in (objects if objects is not None else bpy.data.objects) if o.type == "MESH"]
+    targets = [o for o in targets if o.data.materials and o.get("gcp_kind") != "fog"]
+    if not targets:
+        return []
+
+    previous_engine = scene.render.engine
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = samples
+    scene.render.bake.use_pass_direct = False
+    scene.render.bake.use_pass_indirect = False
+    scene.render.bake.margin = margin
+
+    passes = [("DIFFUSE", "Base Color", False)]
+    if bake_normal:
+        passes.append(("NORMAL", "Normal", True))
+
+    baked = []
+    for obj in targets:
+        if not obj.data.uv_layers:
+            bpy.ops.object.select_all(action="DESELECT")
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode="EDIT")
+            bpy.ops.mesh.select_all(action="SELECT")
+            bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.02)
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+        for bake_type, socket, is_normal in passes:
+            # Every material slot gets its own target image, so one bake call
+            # fills them all. Baking only slot 0 leaves joined objects like a
+            # pine with untextured needles.
+            pending = []
+            for index, mat in enumerate(obj.data.materials):
+                nt, bsdf = _principled_of(mat)
+                if bsdf is None:
+                    continue
+                image = bpy.data.images.new(
+                    f"{obj.name}_{index}_{bake_type.lower()}", size, size, alpha=False
+                )
+                image.colorspace_settings.name = "Non-Color" if is_normal else "sRGB"
+                tex_node = nt.nodes.new("ShaderNodeTexImage")
+                tex_node.image = image
+                nt.nodes.active = tex_node
+                for node in nt.nodes:
+                    node.select = node is tex_node
+                pending.append((nt, bsdf, tex_node, image))
+
+            if not pending:
+                continue
+
+            bpy.ops.object.select_all(action="DESELECT")
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            try:
+                bpy.ops.object.bake(type=bake_type)
+            except RuntimeError:
+                for nt, _, tex_node, image in pending:
+                    nt.nodes.remove(tex_node)
+                    bpy.data.images.remove(image)
+                continue
+
+            for nt, bsdf, tex_node, image in pending:
+                image.pack()
+                if is_normal:
+                    normal_map = nt.nodes.new("ShaderNodeNormalMap")
+                    nt.links.new(tex_node.outputs["Color"], normal_map.inputs["Color"])
+                    nt.links.new(normal_map.outputs["Normal"], bsdf.inputs[socket])
+                else:
+                    for link in list(nt.links):
+                        if link.to_node is bsdf and link.to_socket.name == socket:
+                            nt.links.remove(link)
+                    nt.links.new(tex_node.outputs["Color"], bsdf.inputs[socket])
+                baked.append(image.name)
+
+    bpy.ops.object.select_all(action="DESELECT")
+    scene.render.engine = previous_engine
+    return baked
+
+
+def bake_vertex_colors(objects=None, scale: float = 6.0, strength: float = 0.35) -> int:
+    """Cheap alternative to bake_textures: write procedural variation into a
+    colour attribute.
+
+    glTF multiplies COLOR_0 into the base colour, so this writes a shade factor
+    around 1.0 rather than an absolute colour. A whole forest keeps its
+    break-up for the cost of a loop instead of a Cycles bake per object.
+    """
+    targets = [o for o in (objects if objects is not None else bpy.data.objects) if o.type == "MESH"]
+    touched = 0
+    for obj in targets:
+        mesh = obj.data
+        if not mesh.vertices or obj.get("gcp_kind") == "fog" or not mesh.materials:
+            continue
+        layer = mesh.color_attributes.get("GCPColor") or mesh.color_attributes.new(
+            name="GCPColor", type="FLOAT_COLOR", domain="POINT"
+        )
+        for i, vert in enumerate(mesh.vertices):
+            world_co = obj.matrix_world @ vert.co
+            n = bl_noise.fractal(world_co * (scale / 10.0), 1.0, 2.0, 3)
+            f = min(1.6, max(0.4, 1.0 + n * strength))
+            layer.data[i].color = (f, f, f, 1.0)
+        touched += 1
+    return touched
+
+
 def export_glb(filename: str = "world.glb") -> str:
     path = os.path.join(EXPORT_DIR, filename)
-    bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_apply=True)
+    _refit_fog()
+    for image in bpy.data.images:
+        if image.has_data and not image.packed_file and not image.filepath:
+            try:
+                image.pack()
+            except Exception:
+                pass
+    bpy.ops.export_scene.gltf(
+        filepath=path,
+        export_format="GLB",
+        export_apply=True,
+        export_vertex_color="ACTIVE",
+    )
     return path
 
 

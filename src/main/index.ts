@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runAgent, stopAgent } from './agent/harness'
-import { detectBlender, inspectWorld, renderWorld } from './blender'
+import { detectBlender, exportWorldGlb, inspectWorld, renderWorld } from './blender'
 import { createWorld, getWorld, libraryRoot, listWorlds, updateWorld } from './projects'
 import { PROVIDERS } from './providers/catalog'
 import { listOpenAIModels } from './providers/client'
@@ -103,6 +103,7 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('blender:inspect', (_e, id: string) => inspectWorld(id))
   ipcMain.handle('blender:render', (_e, id: string) => renderWorld(id))
+  ipcMain.handle('blender:exportGlb', (_e, id: string, force?: boolean) => exportWorldGlb(id, Boolean(force)))
 
   ipcMain.handle('agent:run', async (_e, payload: { worldId: string; message: string; live?: boolean }) => {
     await runAgent({ ...payload, window: mainWindow })

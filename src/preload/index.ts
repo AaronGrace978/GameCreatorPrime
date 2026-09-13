@@ -33,7 +33,9 @@ const api = {
     detect: () => ipcRenderer.invoke('blender:detect') as Promise<string[]>,
     pick: () => ipcRenderer.invoke('blender:pick') as Promise<string | null>,
     inspect: (id: string) => ipcRenderer.invoke('blender:inspect', id),
-    render: (id: string) => ipcRenderer.invoke('blender:render', id)
+    render: (id: string) => ipcRenderer.invoke('blender:render', id),
+    exportGlb: (id: string, force?: boolean) =>
+      ipcRenderer.invoke('blender:exportGlb', id, force) as Promise<{ glbPath?: string; stderr?: string }>
   },
   agent: {
     run: (payload: { worldId: string; message: string; live?: boolean }) => ipcRenderer.invoke('agent:run', payload),

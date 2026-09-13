@@ -17,6 +17,8 @@ import bpy  # noqa: E402
 from gcp import (  # noqa: E402
     area_light,
     assign_mat,
+    bake_textures,
+    bake_vertex_colors,
     bevel,
     clear_zone,
     displace_surface,
@@ -276,6 +278,33 @@ def main():
         "sky reaches the world output",
         any(n.type == "BACKGROUND" for n in world_nt.nodes),
         "no background shader on the world",
+    )
+
+    print("texture baking")
+    baked = step(
+        "bake_textures",
+        lambda: bake_textures([bpy.data.objects["Pine_Hero"], bpy.data.objects["Boulder"]], size=64, samples=1, bake_normal=True),
+    )
+    step("bake_vertex_colors", lambda: bake_vertex_colors([bpy.data.objects["Cube_A"]]))
+    check(
+        "baking covers every material slot, not just the first",
+        bool(baked) and len(baked) >= 4,
+        f"baked {len(baked) if baked else 0} images for a 2-material pine plus a rock",
+    )
+    hero = bpy.data.objects["Pine_Hero"]
+    wired = all(
+        any(
+            link.to_node.type == "BSDF_PRINCIPLED" and link.from_node.type == "TEX_IMAGE"
+            for link in mat.node_tree.links
+        )
+        for mat in hero.data.materials
+        if mat and mat.use_nodes
+    )
+    check("baked image is wired into Base Color", wired, "a material still has no image feeding the BSDF")
+    check(
+        "baking left the render engine alone",
+        bpy.context.scene.render.engine != "CYCLES",
+        f"engine is still {bpy.context.scene.render.engine}",
     )
 
     print("output")

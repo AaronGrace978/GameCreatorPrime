@@ -233,6 +233,49 @@ render_still("preview.png")
   return { ...result, previewPath: exists ? previewPath : undefined, blendPath }
 }
 
+/** Export GLB from an existing .blend. Worlds built before GLB export still have one. */
+export async function exportWorldGlb(worldId: string, force = false): Promise<BlenderRunResult> {
+  const world = getWorld(worldId)
+  if (!world) throw new Error('World not found')
+  const folder = worldFolder(worldId)
+  const blendPath = join(folder, 'world.blend')
+  const glbPath = join(folder, 'exports', 'world.glb')
+  if (!existsSync(blendPath)) throw new Error('No .blend yet — build the world first.')
+  if (!force && existsSync(glbPath)) {
+    return { ok: true, code: 0, stdout: '', stderr: '', durationMs: 0, glbPath, blendPath }
+  }
+
+  const blender = await resolveBlender()
+  const py = join(folder, 'scripts', '_export.py')
+  writeFileSync(
+    py,
+    `import os, sys
+sys.path.insert(0, os.environ["GCP_RUNTIME"])
+from gcp import configure, export_glb
+configure(
+    project_dir=os.environ["GCP_PROJECT"],
+    blend_path=os.environ["GCP_BLEND"],
+    render_dir=os.environ["GCP_RENDERS"],
+    export_dir=os.environ["GCP_EXPORTS"],
+    mode=os.environ.get("GCP_MODE", "generative"),
+)
+export_glb("world.glb")
+`,
+    'utf8'
+  )
+  const result = await execBlender(blender, ['--background', blendPath, '--python', py], {
+    GCP_RUNTIME: runtimeDir(),
+    GCP_PROJECT: folder,
+    GCP_BLEND: blendPath,
+    GCP_RENDERS: join(folder, 'renders'),
+    GCP_EXPORTS: join(folder, 'exports'),
+    GCP_MODE: world.mode
+  })
+  const made = existsSync(glbPath) ? glbPath : undefined
+  if (made) updateWorld(worldId, { glbPath: made })
+  return { ...result, glbPath: made, blendPath }
+}
+
 function parseScene(stdout: string) {
   const marker = 'GCP_SCENE_JSON:'
   const line = stdout.split(/\r?\n/).reverse().find((l) => l.includes(marker))

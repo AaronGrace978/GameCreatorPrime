@@ -45,6 +45,20 @@ Core helpers:
   set_active_camera(name)
   set_interpolation(obj, "BEZIER"|"LINEAR"|"CONSTANT")
 
+Surfacing — the world is exported to GLB and viewed in 3D, not only rendered:
+  noise_material(name, color, accent, scale, roughness, bump, metallic)
+    Procedural colour break-up and bump. Use it instead of flat pbr() colours
+    for ground, bark, rock, plaster, snow.
+  bake_textures(objects, size=512, samples=4, bake_normal=False)
+    glTF cannot carry a node graph. Without this the GLB loses all noise and
+    bump. Bake the hero objects — terrain, landmark, feature props. It runs in
+    Cycles per object, so do not hand it a whole forest.
+  bake_vertex_colors(objects)
+    The cheap path for the masses. Writes shade variation glTF carries as
+    vertex colours. Use it on scattered trees and rocks.
+  Finish a build with: bake_textures([ground, landmark]) then
+  bake_vertex_colors(scattered_props).
+
 Atmosphere (use these — never fake fog with stacked translucent planes, it blinds the camera):
   sky(top, horizon, strength)                      gradient sky dome
   fog(density=0.012, color)                        scene-wide volumetric haze
