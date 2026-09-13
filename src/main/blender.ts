@@ -241,7 +241,17 @@ export async function exportWorldGlb(worldId: string, force = false): Promise<Bl
   const folder = worldFolder(worldId)
   const blendPath = join(folder, 'world.blend')
   const glbPath = join(folder, 'exports', 'world.glb')
-  if (!existsSync(blendPath)) throw new Error('No .blend yet — build the world first.')
+  // An unbuilt world is an ordinary state, not a failure worth an IPC exception.
+  if (!existsSync(blendPath)) {
+    return {
+      ok: false,
+      code: 0,
+      stdout: '',
+      stderr: 'No .blend yet — build the world first.',
+      durationMs: 0,
+      blendPath
+    }
+  }
   if (!force && existsSync(glbPath)) {
     return { ok: true, code: 0, stdout: '', stderr: '', durationMs: 0, glbPath, blendPath }
   }

@@ -178,7 +178,7 @@ export default function App() {
     setView('studio')
     setView3d(true)
     setMode(next.mode || 'generative')
-    if (!next.glbPath) await buildModel(next.id)
+    if (!next.glbPath && next.status !== 'draft') await buildModel(next.id)
   }
 
   /** Worlds built before GLB export, or after a live mutate, need one made from the .blend. */
@@ -191,7 +191,7 @@ export default function App() {
         setView3d(true)
         setStatus('3D world ready')
       } else {
-        setStatus('No GLB was produced. Build the world first.')
+        setStatus(out?.stderr?.trim() || 'No GLB was produced. Build the world first.')
       }
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
