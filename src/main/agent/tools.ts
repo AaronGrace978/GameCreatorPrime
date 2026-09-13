@@ -177,6 +177,13 @@ export async function executeTool(
     case 'finish_world': {
       const summary = String(args.summary || '')
       const title = args.title ? String(args.title) : undefined
+      const blendPath = join(worldFolder(ctx.worldId), 'world.blend')
+      if (!existsSync(blendPath)) {
+        return {
+          result:
+            'Refusing to finish: no world.blend exists yet, so nothing was built. Run run_blender and fix any traceback before calling finish_world.'
+        }
+      }
       updateWorld(ctx.worldId, {
         status: 'ready',
         title: title || getWorld(ctx.worldId)?.title

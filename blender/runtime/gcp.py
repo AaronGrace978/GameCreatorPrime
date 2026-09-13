@@ -75,6 +75,27 @@ def _set_render_engine(scene) -> None:
             continue
 
 
+def _set_quality(scene) -> None:
+    """Preview stills are the only thing the director ever sees. Don't ship noise."""
+    eevee = getattr(scene, "eevee", None)
+    if eevee is not None:
+        for attr, value in (
+            ("taa_render_samples", 64),
+            ("use_raytracing", True),
+            ("use_shadows", True),
+            ("volumetric_samples", 64),
+        ):
+            try:
+                setattr(eevee, attr, value)
+            except Exception:
+                pass
+    try:
+        scene.view_settings.view_transform = "AgX"
+        scene.view_settings.look = "AgX - Medium Contrast"
+    except Exception:
+        pass
+
+
 def reset_scene() -> None:
     try:
         bpy.ops.wm.read_homefile(use_empty=True)
@@ -85,17 +106,14 @@ def reset_scene() -> None:
     scene.unit_settings.system = "METRIC"
     scene.unit_settings.scale_length = 1.0
     _set_render_engine(scene)
+    _set_quality(scene)
     scene.render.resolution_x = 1920
     scene.render.resolution_y = 1080
     scene.render.fps = 24
     scene.frame_start = 1
     scene.frame_end = 120
     scene.world = bpy.data.worlds.new("GCP_World")
-    scene.world.use_nodes = True
-    bg = scene.world.node_tree.nodes.get("Background")
-    if bg:
-        bg.inputs[0].default_value = (0.03, 0.035, 0.05, 1)
-        bg.inputs[1].default_value = 0.6
+    sky()
     for name in (
         "ENV",
         "PROPS",
@@ -120,10 +138,31 @@ def collection(name: str) -> bpy.types.Collection:
     return col
 
 
+def _scene_collections() -> set:
+    scene_col = bpy.context.scene.collection
+    seen = {scene_col}
+    stack = [scene_col]
+    while stack:
+        for child in stack.pop().children:
+            if child not in seen:
+                seen.add(child)
+                stack.append(child)
+    return seen
+
+
 def _link(obj: bpy.types.Object, col_name: str) -> bpy.types.Object:
+    """Move obj into one authored collection.
+
+    Only scene-tree collections are unlinked. RigidBodyWorld lives outside the
+    scene tree, and dropping the object from it removes it from the simulation.
+    """
+    target = collection(col_name)
+    scene_cols = _scene_collections()
     for col in list(obj.users_collection):
-        col.objects.unlink(obj)
-    collection(col_name).objects.link(obj)
+        if col is not target and col in scene_cols:
+            col.objects.unlink(obj)
+    if obj.name not in target.objects:
+        target.objects.link(obj)
     return obj
 
 
@@ -194,6 +233,44 @@ def terrain(
     return obj
 
 
+def _frames2(frames, start: int = 1) -> tuple[int, int]:
+    """Accept a frame count or an explicit (start, end) range."""
+    if isinstance(frames, (int, float)):
+        return (start, max(start + 1, int(frames)))
+    seq = [int(f) for f in frames]
+    if len(seq) == 1:
+        return (start, max(start + 1, seq[0]))
+    return (seq[0], max(seq[0] + 1, seq[1]))
+
+
+def _size3(size) -> tuple[float, float, float]:
+    """Accept a number or an (x, y, z) sequence as full-extent dimensions."""
+    if isinstance(size, (int, float)):
+        v = float(size)
+        return (v, v, v)
+    seq = [float(s) for s in size]
+    while len(seq) < 3:
+        seq.append(seq[-1] if seq else 1.0)
+    return (seq[0], seq[1], seq[2])
+
+
+def _half3(size) -> tuple[float, float, float]:
+    x, y, z = _size3(size)
+    return (x / 2, y / 2, z / 2)
+
+
+def _rgba(value, alpha: float = 1.0) -> tuple[float, float, float, float]:
+    seq = tuple(value)
+    if len(seq) >= 4:
+        return (float(seq[0]), float(seq[1]), float(seq[2]), float(seq[3]))
+    if len(seq) == 3:
+        return (float(seq[0]), float(seq[1]), float(seq[2]), alpha)
+    if len(seq) == 1:
+        v = float(seq[0])
+        return (v, v, v, alpha)
+    return (0.0, 0.0, 0.0, alpha)
+
+
 def pbr(
     name: str,
     color=(0.8, 0.8, 0.8, 1),
@@ -206,15 +283,122 @@ def pbr(
     mat.use_nodes = True
     nt = mat.node_tree
     principled = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
-    principled.inputs["Base Color"].default_value = color
+    principled.inputs["Base Color"].default_value = _rgba(color)
     principled.inputs["Roughness"].default_value = roughness
     principled.inputs["Metallic"].default_value = metallic
+    emit = _rgba(emission)
     if "Emission Color" in principled.inputs:
-        principled.inputs["Emission Color"].default_value = emission
+        principled.inputs["Emission Color"].default_value = emit
         principled.inputs["Emission Strength"].default_value = emission_strength
     elif "Emission" in principled.inputs:
-        principled.inputs["Emission"].default_value = emission
+        principled.inputs["Emission"].default_value = emit
     return mat
+
+
+def _output_node(nt, node_type: str, bl_idname: str):
+    """Re-fetch by type. Node references go stale after nodes.remove()."""
+    node = next((n for n in nt.nodes if n.type == node_type), None)
+    return node if node is not None else nt.nodes.new(bl_idname)
+
+
+def _world_tree():
+    scene = bpy.context.scene
+    if scene.world is None:
+        scene.world = bpy.data.worlds.new("GCP_World")
+    scene.world.use_nodes = True
+    return scene.world.node_tree
+
+
+def sky(top=(0.05, 0.08, 0.14), horizon=(0.35, 0.38, 0.42), strength: float = 1.0):
+    """Gradient sky dome on the world background. Replaces the flat reset color."""
+    nt = _world_tree()
+    for node in list(nt.nodes):
+        if node.type in ("BACKGROUND", "TEX_GRADIENT", "VALTORGB", "MAPPING", "TEX_COORD", "SEPXYZ", "MAP_RANGE"):
+            nt.nodes.remove(node)
+    out = _output_node(nt, "OUTPUT_WORLD", "ShaderNodeOutputWorld")
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    # The view vector's Z runs -1 at the nadir to +1 at the zenith.
+    rng = nt.nodes.new("ShaderNodeMapRange")
+    rng.inputs["From Min"].default_value = -0.25
+    rng.inputs["From Max"].default_value = 0.6
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].color = _rgba(horizon)
+    ramp.color_ramp.elements[1].color = _rgba(top)
+    bg = nt.nodes.new("ShaderNodeBackground")
+    bg.inputs["Strength"].default_value = strength
+    nt.links.new(coord.outputs["Generated"], sep.inputs["Vector"])
+    nt.links.new(sep.outputs["Z"], rng.inputs["Value"])
+    nt.links.new(rng.outputs["Result"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], bg.inputs["Color"])
+    nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+    return bpy.context.scene.world
+
+
+def _scene_bounds(pad: float = 12.0):
+    xs, ys, zs = [], [], []
+    for obj in bpy.data.objects:
+        if obj.type != "MESH" or obj.get("gcp_kind") == "fog":
+            continue
+        for corner in obj.bound_box:
+            world_co = obj.matrix_world @ Vector(corner)
+            xs.append(world_co.x)
+            ys.append(world_co.y)
+            zs.append(world_co.z)
+    if not xs:
+        return (0.0, 0.0, 15.0), (200.0, 200.0, 40.0)
+    center = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, (min(zs) + max(zs)) / 2 + pad / 2)
+    size = (max(xs) - min(xs) + pad * 2, max(ys) - min(ys) + pad * 2, max(zs) - min(zs) + pad * 2)
+    return center, size
+
+
+def fog(density: float = 0.005, color=(0.62, 0.68, 0.74)):
+    """Scene-wide volumetric haze covering everything built so far.
+
+    A box volume, not a world volume: EEVEE renders world volumes as a black
+    frame. Call this after the geometry exists so the box can enclose it.
+
+    Density is extinction per meter. On a 150m landscape, 0.004-0.008 reads as
+    distance haze; past ~0.02 the frame turns into milk.
+    """
+    existing = bpy.data.objects.get("GCP_Fog")
+    if existing:
+        bpy.data.objects.remove(existing, do_unlink=True)
+    center, size = _scene_bounds()
+    obj = fog_volume("GCP_Fog", center, size, density=density, color=color)
+    tag(obj, gcp_fog_auto=True)
+    return obj
+
+
+def _refit_fog() -> None:
+    """Re-enclose the scene so fog() can be called before the geometry exists."""
+    obj = bpy.data.objects.get("GCP_Fog")
+    if obj is None or not obj.get("gcp_fog_auto"):
+        return
+    center, size = _scene_bounds()
+    obj.location = center
+    obj.scale = (1, 1, 1)
+    obj.dimensions = size
+
+
+def fog_volume(name: str, location, size, density: float = 0.02, color=(0.72, 0.76, 0.8)):
+    """A box of localized mist — ground haze, a foggy hollow, smoke in a room."""
+    obj = primitive("cube", name, "ENV", location=location, scale=_half3(size))
+    mat = bpy.data.materials.get(f"{name}Mat") or bpy.data.materials.new(f"{name}Mat")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    for node in list(nt.nodes):
+        if node.type != "OUTPUT_MATERIAL":
+            nt.nodes.remove(node)
+    out = _output_node(nt, "OUTPUT_MATERIAL", "ShaderNodeOutputMaterial")
+    vol = nt.nodes.new("ShaderNodeVolumePrincipled")
+    vol.inputs["Color"].default_value = _rgba(color)
+    vol.inputs["Density"].default_value = density
+    nt.links.new(vol.outputs["Volume"], out.inputs["Volume"])
+    assign_mat(obj, mat)
+    obj.display_type = "WIRE"
+    tag(obj, gcp_kind="fog")
+    return obj
 
 
 def assign_mat(obj: bpy.types.Object, mat: bpy.types.Material) -> None:
@@ -301,7 +485,7 @@ def rigid(obj: bpy.types.Object, body_type: str = "ACTIVE", shape: str = "CONVEX
 
 
 def collision_box(name: str, location, size, invisible: bool = True):
-    obj = primitive("cube", name, "PHYSICS", location=location, scale=tuple(s / 2 for s in size))
+    obj = primitive("cube", name, "PHYSICS", location=location, scale=_half3(size))
     rigid(obj, "PASSIVE", "BOX")
     if invisible:
         obj.display_type = "WIRE"
@@ -325,16 +509,16 @@ def character_capsule(
     return obj
 
 
-def grasp_target(name: str, location, size: float = 0.12, color=(0.95, 0.75, 0.15, 1)):
-    obj = primitive("uv_sphere", name, "PHYSICS", location=location, scale=(size, size, size))
+def grasp_target(name: str, location, size=0.12, color=(0.95, 0.75, 0.15, 1)):
+    obj = primitive("uv_sphere", name, "PHYSICS", location=location, scale=_size3(size))
     assign_mat(obj, pbr(f"{name}Mat", color, roughness=0.25, metallic=0.15))
     rigid(obj, "ACTIVE", "SPHERE", mass=0.2)
     tag(obj, gcp_kind="graspable")
     return obj
 
 
-def crate(name: str, location, size: float = 0.6, mass: float = 8.0):
-    obj = primitive("cube", name, "PROPS", location=location, scale=(size / 2, size / 2, size / 2))
+def crate(name: str, location, size=0.6, mass: float = 8.0):
+    obj = primitive("cube", name, "PROPS", location=location, scale=_half3(size))
     assign_mat(obj, pbr("CrateMat", (0.45, 0.28, 0.12, 1), roughness=0.75))
     rigid(obj, "ACTIVE", "BOX", mass=mass)
     tag(obj, gcp_kind="prop")
@@ -355,7 +539,7 @@ def waypoint_path(name: str, points: Sequence[Sequence[float]], closed: bool = F
 
 
 def nav_volume(name: str, location, size):
-    obj = primitive("cube", name, "NAV", location=location, scale=tuple(s / 2 for s in size))
+    obj = primitive("cube", name, "NAV", location=location, scale=_half3(size))
     obj.display_type = "WIRE"
     obj.hide_render = True
     tag(obj, gcp_kind="nav_volume")
@@ -369,7 +553,7 @@ def spawn_marker(
     archetype: str = "wolf",
     prompt: str = "",
 ):
-    obj = primitive("ico", name, "SPAWN", location=location, scale=(0.35, 0.35, 0.35))
+    obj = primitive("ico", name, "SPAWN", location=location, scale=_size3(0.35))
     colors = {
         "enemy": (0.85, 0.15, 0.18, 1),
         "npc": (0.2, 0.55, 0.95, 1),
@@ -423,15 +607,46 @@ def follow_camera(target: bpy.types.Object, offset=(0, -6.5, 2.4), name: str = "
     return cam
 
 
+def fcurves_of(obj: bpy.types.Object) -> list:
+    """Blender 4.4+ moved f-curves into action slots; action.fcurves is gone in 5.x."""
+    anim = obj.animation_data
+    action = anim.action if anim else None
+    if action is None:
+        return []
+    legacy = getattr(action, "fcurves", None)
+    if legacy is not None:
+        return list(legacy)
+    slot = getattr(anim, "action_slot", None)
+    curves = []
+    for layer in getattr(action, "layers", []):
+        for strip in getattr(layer, "strips", []):
+            bag = None
+            if slot is not None:
+                try:
+                    bag = strip.channelbag(slot)
+                except Exception:
+                    bag = None
+            bags = [bag] if bag is not None else list(getattr(strip, "channelbags", []))
+            for item in bags:
+                curves.extend(getattr(item, "fcurves", []))
+    return curves
+
+
+def set_interpolation(obj: bpy.types.Object, mode: str = "BEZIER") -> None:
+    for fcurve in fcurves_of(obj):
+        for kp in fcurve.keyframe_points:
+            kp.interpolation = mode
+
+
 def dolly_shot(name: str, start, end, look_at, frames=(1, 72), lens: float = 40.0):
+    first, last = _frames2(frames)
     cam = camera(name, start, look_at=look_at, lens=lens, kind="shot")
     cam.location = start
-    cam.keyframe_insert("location", frame=frames[0])
+    cam.keyframe_insert("location", frame=first)
     cam.location = end
-    cam.keyframe_insert("location", frame=frames[1])
-    for fcurve in cam.animation_data.action.fcurves:
-        for kp in fcurve.keyframe_points:
-            kp.interpolation = "BEZIER"
+    cam.keyframe_insert("location", frame=last)
+    set_interpolation(cam, "BEZIER")
+    bpy.context.scene.frame_end = max(bpy.context.scene.frame_end, last)
     tag(cam, gcp_shot=name)
     return cam
 
@@ -495,7 +710,7 @@ def key_pose(obj: bpy.types.Object, frame: int, location=None, rotation=None):
 
 
 def building_block(name: str, location, size, color=(0.22, 0.22, 0.24, 1)):
-    obj = primitive("cube", name, "ENV", location=location, scale=tuple(s / 2 for s in size))
+    obj = primitive("cube", name, "ENV", location=location, scale=_half3(size))
     assign_mat(obj, pbr(f"{name}Mat", color, roughness=0.7))
     rigid(obj, "PASSIVE", "BOX")
     return obj
@@ -534,6 +749,7 @@ def bake_physics(frames: int = 120) -> None:
 def save_blend() -> str:
     if not BLEND_PATH:
         raise RuntimeError("BLEND_PATH is not configured")
+    _refit_fog()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
     return BLEND_PATH
 
@@ -541,6 +757,7 @@ def save_blend() -> str:
 def render_still(filename: str = "preview.png", frame: int = 1) -> str:
     path = os.path.join(RENDER_DIR, filename)
     scene = bpy.context.scene
+    _refit_fog()
     if scene.camera is None:
         camera("AutoCam", (12, -14, 8), look_at=(0, 0, 1.2), kind="beauty")
     scene.frame_set(frame)

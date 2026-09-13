@@ -38,10 +38,12 @@ const api = {
   agent: {
     run: (payload: { worldId: string; message: string; live?: boolean }) => ipcRenderer.invoke('agent:run', payload),
     stop: (worldId: string) => ipcRenderer.invoke('agent:stop', worldId),
-    onEvent: (fn: (event: AgentPayload) => void) => {
+    onEvent: (fn: (event: AgentPayload) => void): (() => void) => {
       const listener = (_: unknown, data: AgentPayload) => fn(data)
       ipcRenderer.on('agent:event', listener)
-      return () => ipcRenderer.removeListener('agent:event', listener)
+      return () => {
+        ipcRenderer.removeListener('agent:event', listener)
+      }
     }
   },
   toPreviewUrl: (filePath?: string) =>

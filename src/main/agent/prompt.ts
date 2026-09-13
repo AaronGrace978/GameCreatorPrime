@@ -7,6 +7,11 @@ Do NOT import bpy setup, configure(), open_or_reset(), save_blend(), or write_in
 
 Scale: 1 Blender unit = 1 meter. Origin is world center. Name everything. Never leave default gray cubes.
 
+Argument conventions:
+  size   — a number (uniform) or (x, y, z) full extents in meters. Both work everywhere.
+  color  — (r, g, b) or (r, g, b, a). Both work everywhere.
+  location / look_at / offset — always (x, y, z).
+
 Collections (use them):
   ENV, PROPS, ACTORS, PHYSICS, NAV, SPAWN, LIGHTS, CAMERAS, ANIM, GAMEPLAY
 
@@ -23,6 +28,12 @@ Core helpers:
   follow_camera(target, offset, name)
   dolly_shot(name, start, end, look_at, frames, lens)
   set_active_camera(name)
+  set_interpolation(obj, "BEZIER"|"LINEAR"|"CONSTANT")
+
+Atmosphere (use these — never fake fog with stacked translucent planes, it blinds the camera):
+  sky(top, horizon, strength)                      gradient sky dome
+  fog(density=0.012, color)                        scene-wide volumetric haze
+  fog_volume(name, location, size, density, color) localized mist: ground haze, a foggy hollow
 
 Embodiment / physics:
   character_capsule(name, location, height=1.8, radius=0.32, mass=70)
@@ -51,6 +62,8 @@ Always:
   - Add at least one camera and lighting that matches the mood
   - Tag important objects via helpers (they set gcp_* properties)
   - Keep code deterministic with explicit seeds
+  - Keep the beauty camera's first 3 meters clear, and aim it at the landmark — a
+    camera buried in terrain, fog, or a wall renders a flat gray frame
 `.trim()
 
 const EMBODIMENT = `
