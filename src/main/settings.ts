@@ -8,6 +8,7 @@ export interface AppSettings {
   customBaseUrl: string
   customModelId: string
   blenderPath: string
+  assetServerUrl: string
   libraryPath: string
   maxAgentSteps: number
   temperature: number
@@ -20,6 +21,7 @@ const DEFAULTS: AppSettings = {
   customBaseUrl: 'http://127.0.0.1:8000/v1',
   customModelId: 'custom-model',
   blenderPath: '',
+  assetServerUrl: 'http://127.0.0.1:8081',
   libraryPath: '',
   maxAgentSteps: 18,
   temperature: 0.35,
@@ -79,6 +81,7 @@ export function publicSettings() {
     customBaseUrl: s.customBaseUrl,
     customModelId: s.customModelId,
     blenderPath: s.blenderPath,
+    assetServerUrl: s.assetServerUrl,
     libraryPath: s.libraryPath,
     maxAgentSteps: s.maxAgentSteps,
     temperature: s.temperature,

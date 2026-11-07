@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { AssetRecord, AssetGenerateInput } from '../shared/assets'
 
 export type AgentPayload = {
   worldId: string
@@ -13,6 +14,24 @@ export type AgentPayload = {
 }
 
 const api = {
+  assets: {
+    setupFolder: () => ipcRenderer.invoke('assets:setupFolder') as Promise<void>,
+    setupGuide: () => ipcRenderer.invoke('assets:setupGuide') as Promise<void>,
+    checkServer: (url: string) => ipcRenderer.invoke('assets:checkServer', url) as Promise<{ status: 'ready' | 'busy'; memoryMode: string }>,
+    list: () => ipcRenderer.invoke('assets:list') as Promise<AssetRecord[]>,
+    reference: () => ipcRenderer.invoke('assets:reference') as Promise<AssetRecord | null>,
+    import: () => ipcRenderer.invoke('assets:import') as Promise<AssetRecord | null>,
+    generate: (input: AssetGenerateInput) => ipcRenderer.invoke('assets:generate', input) as Promise<AssetRecord>,
+    cancel: (id: string) => ipcRenderer.invoke('assets:cancel', id) as Promise<void>,
+    export: (id: string) => ipcRenderer.invoke('assets:export', id) as Promise<boolean>,
+    blend: (id: string) => ipcRenderer.invoke('assets:blend', id) as Promise<AssetRecord>,
+    folder: (id: string) => ipcRenderer.invoke('assets:folder', id) as Promise<void>,
+    onChange: (fn: (asset: AssetRecord) => void) => {
+      const listener = (_: unknown, asset: AssetRecord) => fn(asset)
+      ipcRenderer.on('assets:changed', listener)
+      return () => { ipcRenderer.removeListener('assets:changed', listener) }
+    }
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (patch: Record<string, unknown>) => ipcRenderer.invoke('settings:set', patch),

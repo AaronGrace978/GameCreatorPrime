@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { STUDIO_MODES, type StudioMode, modeMeta } from '@shared/modes'
 import WorldViewport from './WorldViewport'
+import AssetStudio from './AssetStudio'
 
-type View = 'home' | 'studio' | 'settings'
+type View = 'home' | 'studio' | 'settings' | 'assets'
 
 type World = {
   id: string
@@ -225,6 +226,9 @@ export default function App() {
           GameCreator Prime
         </div>
         <div className="title-actions">
+          <button className={`chip ${view === 'assets' ? 'active' : ''}`} onClick={() => setView('assets')}>
+            Assets
+          </button>
           <button className={`chip ${view === 'home' ? 'active' : ''}`} onClick={() => setView('home')}>
             Studio
           </button>
@@ -240,6 +244,7 @@ export default function App() {
       </header>
 
       <main className="stage">
+        {view === 'assets' && <AssetStudio />}
         {view === 'home' && (
           <div className="home">
             <div className="kicker">Free world studio · Blender Python agent</div>

@@ -8,6 +8,9 @@ import { createWorld, getWorld, libraryRoot, listWorlds, updateWorld } from './p
 import { PROVIDERS } from './providers/catalog'
 import { listProviderModels } from './providers/client'
 import { getApiKey, loadSettings, publicSettings, saveSettings, setApiKey, type AppSettings } from './settings'
+import { assets, pickReference, importAsset, exportAsset, prepareBlend, openAssetFolder, assetServer } from './assets'
+import type { AssetGenerateInput } from '../shared/assets'
+import { backendUrl, checkAssetServer } from './assets/client'
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'gcp', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
 
@@ -61,6 +64,7 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:set', (_e, patch: Partial<AppSettings> & { apiKeys?: Record<string, string> }) => {
     const current = loadSettings()
     const { apiKeys, ...rest } = patch
+    if (rest.assetServerUrl !== undefined) rest.assetServerUrl = backendUrl(rest.assetServerUrl).toString()
     saveSettings({ ...current, ...rest })
     if (apiKeys) {
       for (const [id, key] of Object.entries(apiKeys)) {
@@ -92,6 +96,27 @@ app.whenReady().then(() => {
     if (world) await shell.openPath(world.folder)
   })
   ipcMain.handle('library:path', () => libraryRoot())
+
+  const assetLibrary = () => assets((asset) => mainWindow?.webContents.send('assets:changed', asset))
+  ipcMain.handle('assets:list', () => assetLibrary().list())
+  ipcMain.handle('assets:checkServer', (_e, url: string) => checkAssetServer(url))
+  ipcMain.handle('assets:setupFolder', async () => {
+    const root = app.isPackaged ? process.resourcesPath : app.getAppPath()
+    const error = await shell.openPath(join(root, 'services', 'hunyuan'))
+    if (error) throw new Error(error)
+  })
+  ipcMain.handle('assets:setupGuide', async () => {
+    const root = app.isPackaged ? process.resourcesPath : app.getAppPath()
+    const error = await shell.openPath(join(root, 'docs', 'asset-generation.md'))
+    if (error) throw new Error(error)
+  })
+  ipcMain.handle('assets:reference', () => pickReference(assetLibrary()))
+  ipcMain.handle('assets:import', () => importAsset(assetLibrary()))
+  ipcMain.handle('assets:generate', (_e, input: AssetGenerateInput) => assetLibrary().generate(input, assetServer()))
+  ipcMain.handle('assets:cancel', (_e, id: string) => assetLibrary().cancel(id))
+  ipcMain.handle('assets:export', (_e, id: string) => exportAsset(assetLibrary(), id))
+  ipcMain.handle('assets:blend', (_e, id: string) => prepareBlend(assetLibrary(), id))
+  ipcMain.handle('assets:folder', (_e, id: string) => openAssetFolder(assetLibrary(), id))
 
   ipcMain.handle('blender:detect', () => detectBlender())
   ipcMain.handle('blender:pick', async () => {

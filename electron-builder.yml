@@ -10,6 +10,16 @@ files:
 extraResources:
   - from: blender
     to: blender
+    filter:
+      - '**/*'
+      - '!**/__pycache__/**'
+  - from: services/hunyuan
+    to: services/hunyuan
+    filter:
+      - '*.py'
+      - '!test_*.py'
+  - from: docs/asset-generation.md
+    to: docs/asset-generation.md
 win:
   target:
     - nsis

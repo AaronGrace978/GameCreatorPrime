@@ -49,6 +49,12 @@ Worlds are stored in `Documents/GameCreatorPrime/worlds`.
 
 ## How the harness works
 
+### Image-to-3D asset workbench
+
+Open **Assets** to generate a textured asset from a reference image using a local Hunyuan3D 2.1 backend, inspect the returned GLB, keep separate versions, and prepare an editable Blender scene. Existing self-contained GLBs can also be imported. See [GPU setup, memory limits, and validation](docs/asset-generation.md). Neural output quality and 16 GB offloading still require GPU validation; Meshy parity has not been established.
+
+### World scripting
+
 1. You give a world brief (or a live in-world prompt).
 2. The agent plans, then writes Python against `blender/runtime/gcp.py` — not raw one-off `bpy` soup.
 3. Blender runs headless, saves `world.blend`, dumps `scene.json`, and renders a preview still.

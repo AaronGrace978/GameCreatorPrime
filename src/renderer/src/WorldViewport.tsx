@@ -6,16 +6,20 @@ import {
   Color,
   DirectionalLight,
   Fog,
+  LoadingManager,
   PerspectiveCamera,
+  PMREMGenerator,
   Scene,
+  Sphere,
   SRGBColorSpace,
   Vector3,
   WebGLRenderer
 } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
-type Status = 'empty' | 'loading' | 'ready' | 'error'
+type Status = 'empty' | 'loading' | 'ready' | 'error' | 'incomplete'
 
 /**
  * Live 3D view of the exported world. The still render is a second opinion;
@@ -35,7 +39,13 @@ export default function WorldViewport({ src, onError }: { src: string; onError?:
     }
     setStatus('loading')
 
-    const renderer = new WebGLRenderer({ antialias: true, alpha: true })
+    let renderer: WebGLRenderer
+    try { renderer = new WebGLRenderer({ antialias: true, alpha: true }) }
+    catch {
+      setStatus('error')
+      onError?.('A WebGL context could not be created. Check your graphics driver and restart the app.')
+      return
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.outputColorSpace = SRGBColorSpace
     renderer.toneMapping = ACESFilmicToneMapping
@@ -43,6 +53,12 @@ export default function WorldViewport({ src, onError }: { src: string; onError?:
     mount.appendChild(renderer.domElement)
 
     const scene = new Scene()
+    const pmrem = new PMREMGenerator(renderer)
+    const room = new RoomEnvironment()
+    const environment = pmrem.fromScene(room, 0.04)
+    scene.environment = environment.texture
+    room.dispose()
+    pmrem.dispose()
     scene.background = new Color(0x0b0e14)
     scene.fog = new Fog(0x0b0e14, 60, 400)
 
@@ -50,7 +66,7 @@ export default function WorldViewport({ src, onError }: { src: string; onError?:
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.08
-    controls.maxPolarAngle = Math.PI * 0.495
+    controls.maxPolarAngle = Math.PI
     controlsRef.current = controls
 
     scene.add(new AmbientLight(0xbcd2e8, 1.1))
@@ -81,31 +97,37 @@ export default function WorldViewport({ src, onError }: { src: string; onError?:
       renderer.render(scene, camera)
     }
 
-    const loader = new GLTFLoader()
+    let resourceFailed = false
+    const manager = new LoadingManager()
+    manager.onError = () => { resourceFailed = true }
+    const loader = new GLTFLoader(manager)
     loader.load(
       src,
       (gltf) => {
-        if (disposed) return
+        if (disposed) {
+          disposeModel(gltf.scene)
+          return
+        }
         scene.add(gltf.scene)
 
         const box = new Box3().setFromObject(gltf.scene)
         const size = box.getSize(new Vector3())
         const center = box.getCenter(new Vector3())
         const span = Math.max(size.x, size.y, size.z) || 10
-        controls.target.copy(center)
-        camera.position.set(center.x + span * 0.55, center.y + span * 0.42, center.z + span * 0.75)
         camera.near = span / 500
         camera.far = span * 12
         camera.updateProjectionMatrix()
         scene.fog = new Fog(0x0b0e14, span * 0.9, span * 4)
-        controls.update()
-
         frameRef.current = () => {
+          const halfFov = Math.min(camera.fov * Math.PI / 360, Math.atan(Math.tan(camera.fov * Math.PI / 360) * camera.aspect))
+          const distance = box.getBoundingSphere(new Sphere()).radius / Math.sin(halfFov) * 1.15
           controls.target.copy(center)
-          camera.position.set(center.x + span * 0.55, center.y + span * 0.42, center.z + span * 0.75)
+          camera.position.copy(center).add(new Vector3(0.55, 0.42, 0.75).normalize().multiplyScalar(distance))
           controls.update()
         }
-        setStatus('ready')
+        frameRef.current()
+        setStatus(resourceFailed ? 'incomplete' : 'ready')
+        if (resourceFailed) onError?.('Some model textures could not be loaded. Check the asset and reload it before judging its materials.')
         tick()
       },
       undefined,
@@ -122,13 +144,8 @@ export default function WorldViewport({ src, onError }: { src: string; onError?:
       observer.disconnect()
       controls.dispose()
       renderer.dispose()
-      scene.traverse((obj) => {
-        const mesh = obj as { geometry?: { dispose(): void }; material?: unknown }
-        mesh.geometry?.dispose()
-        const mat = mesh.material
-        if (Array.isArray(mat)) mat.forEach((m) => (m as { dispose(): void }).dispose())
-        else if (mat) (mat as { dispose(): void }).dispose()
-      })
+      disposeModel(scene)
+      environment.dispose()
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement)
     }
   }, [src, onError])
@@ -138,6 +155,7 @@ export default function WorldViewport({ src, onError }: { src: string; onError?:
       <div className="viewport3d-canvas" ref={mountRef} />
       {status === 'loading' && <div className="viewport3d-note">Loading the world…</div>}
       {status === 'error' && <div className="viewport3d-note">The GLB could not be loaded.</div>}
+      {status === 'incomplete' && <div className="viewport3d-note">Some textures could not be loaded.</div>}
       {status === 'ready' && (
         <button className="ghost viewport3d-reframe" onClick={() => frameRef.current()}>
           Reframe
@@ -145,4 +163,18 @@ export default function WorldViewport({ src, onError }: { src: string; onError?:
       )}
     </div>
   )
+}
+
+function disposeModel(root: import('three').Object3D) {
+  const textures = new Set<import('three').Texture>()
+  root.traverse(obj => {
+    const mesh = obj as import('three').Mesh
+    mesh.geometry?.dispose()
+    const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
+    for (const material of materials) {
+      for (const value of Object.values(material)) if (value && (value as import('three').Texture).isTexture) textures.add(value as import('three').Texture)
+      material.dispose()
+    }
+  })
+  textures.forEach(texture => texture.dispose())
 }

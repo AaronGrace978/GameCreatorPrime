@@ -42,12 +42,21 @@ jobs:
           }
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
-      - name: Test provider models and discovery
+      - name: Test application and asset generation contracts
         run: npm test
+      - name: Test local GPU backend protocol
+        run: python -m unittest discover -s services/hunyuan -p "test_*.py"
       - name: Check TypeScript
         run: npm exec tsc -- -b
       - name: Build Windows x64 NSIS installer
         run: npm run dist:win -- --x64 --publish never
+      - name: Verify bundled Blender and GPU setup files
+        shell: pwsh
+        run: |
+          $resources = 'release/win-unpacked/resources'
+          @('blender/runtime/prepare_asset.py', 'services/hunyuan/server.py', 'services/hunyuan/worker.py', 'services/hunyuan/doctor.py', 'docs/asset-generation.md') | ForEach-Object {
+            if (-not (Test-Path (Join-Path $resources $_))) { throw "Installer resource missing: $_" }
+          }
       - name: Generate installer checksum
         shell: pwsh
         run: |
@@ -64,5 +73,7 @@ jobs:
         run: |
           $installer = Get-ChildItem release -Filter '*-setup.exe' -File
           $assets = @($installer.FullName, (Resolve-Path release/SHA256SUMS.txt).Path)
-          gh release create $env:RELEASE_TAG @assets --verify-tag --title "GameCreator Prime $env:RELEASE_TAG" --generate-notes --notes "Windows x64 installer only. Install Blender 4.2+ separately and configure your model provider in Providers. This installer is unsigned."
+          $notes = "docs/releases/$env:RELEASE_TAG.md"
+          if (-not (Test-Path $notes)) { throw "Release notes missing: $notes" }
+          gh release create $env:RELEASE_TAG @assets --verify-tag --title "GameCreator Prime $env:RELEASE_TAG" --generate-notes --notes-file $notes
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed' }
