@@ -20,7 +20,8 @@ const api = {
   },
   providers: {
     list: () => ipcRenderer.invoke('providers:list'),
-    discover: () => ipcRenderer.invoke('providers:discover') as Promise<string[]>
+    discover: (input?: { providerId: string; apiKey?: string; baseUrl?: string }) =>
+      ipcRenderer.invoke('providers:discover', input) as Promise<string[]>
   },
   worlds: {
     list: () => ipcRenderer.invoke('worlds:list'),

@@ -24,7 +24,7 @@ A virtual director for **game cameras and cutscenes**: follow cams, lock-ons, do
 - **Multi-provider LLM harness** with tool calling:
   - Ollama Cloud (GLM-5.3, Kimi K3, Qwen 3.5, GPT-OSS, …)
   - Ollama Local (including `:cloud` models)
-  - OpenAI, Anthropic, Gemini, Groq, OpenRouter
+  - OpenAI, Anthropic, Gemini, Groq, OpenRouter, Moonshot AI
   - Any OpenAI-compatible endpoint
 
 ## Setup
@@ -37,6 +37,13 @@ npm run dev
 1. Install [Blender 4.2+](https://www.blender.org/download/). The app auto-detects it on Windows; otherwise set the path in **Providers**.
 2. Create an [Ollama Cloud API key](https://ollama.com/settings/keys) (or another provider key) and paste it in **Providers**.
 3. Pick **Embodiment**, **Generative Play**, or **Direction**, write a brief (or use **Voice**), and run the agent.
+
+In **Providers**, use **Refresh models** to load the models available to your
+account, or enter an exact model ID. You can refresh using a newly entered key
+before saving it. Choose a model that supports tool calling, then save your
+settings. Keys are read from the app's Providers settings; `.env` files are not
+loaded. See [model sources and availability](docs/model-catalog.md) for the
+curated presets and the status of Kimi K3.1 Pro.
 
 Worlds are stored in `Documents/GameCreatorPrime/worlds`.
 
@@ -53,6 +60,24 @@ Worlds are stored in `Documents/GameCreatorPrime/worlds`.
 ```bash
 npm run dist:win
 ```
+
+Windows releases are built on native Windows runners by the
+`Windows release` workflow. Push a version tag matching `package.json` (for
+example `v1.1.0`) to run provider tests, TypeScript checks, and build a Windows
+x64 installer. The release contains only the installer and `SHA256SUMS.txt`.
+Blender 4.2+ is installed separately; installers are unsigned unless signing is
+configured.
+
+Development checks:
+
+```bash
+npm test
+npm exec tsc -- -b
+npm run build
+blender --background --factory-startup --python-exit-code 1 --python blender/runtime/selftest.py
+```
+
+Use Node.js 24 for the dependency-free TypeScript test runner.
 
 ## License
 

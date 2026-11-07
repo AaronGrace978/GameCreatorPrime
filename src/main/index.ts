@@ -6,7 +6,7 @@ import { runAgent, stopAgent } from './agent/harness'
 import { detectBlender, exportWorldGlb, inspectWorld, renderWorld } from './blender'
 import { createWorld, getWorld, libraryRoot, listWorlds, updateWorld } from './projects'
 import { PROVIDERS } from './providers/catalog'
-import { listOpenAIModels } from './providers/client'
+import { listProviderModels } from './providers/client'
 import { getApiKey, loadSettings, publicSettings, saveSettings, setApiKey, type AppSettings } from './settings'
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'gcp', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
@@ -72,14 +72,15 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:hasKey', (_e, providerId: string) => Boolean(getApiKey(providerId)))
 
   ipcMain.handle('providers:list', () => PROVIDERS)
-  ipcMain.handle('providers:discover', async () => {
+  ipcMain.handle('providers:discover', async (_e, input?: { providerId: string; apiKey?: string; baseUrl?: string }) => {
     const settings = loadSettings()
-    try {
-      const ids = await listOpenAIModels('http://127.0.0.1:11434/v1', 'ollama')
-      return ids
-    } catch {
-      return settings.modelId ? [] : []
-    }
+    const providerId = input?.providerId ?? 'ollama-local'
+    const provider = PROVIDERS.find((p) => p.id === providerId)
+    if (!provider) throw new Error('Unknown provider.')
+    const apiKey = input?.apiKey?.trim() || getApiKey(provider.id)
+    if (!provider.keyOptional && !apiKey) throw new Error(`Add an API key for ${provider.name} before refreshing models.`)
+    const baseUrl = provider.id === 'custom' ? input?.baseUrl || settings.customBaseUrl : provider.baseUrl
+    return listProviderModels(baseUrl, apiKey || (provider.id === 'ollama-local' ? 'ollama' : undefined), provider.id.startsWith('ollama-') ? 'ollama-native' : provider.kind)
   })
 
   ipcMain.handle('worlds:list', () => listWorlds())

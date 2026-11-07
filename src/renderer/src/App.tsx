@@ -454,8 +454,8 @@ export default function App() {
         <span className="status-msg" title={status}>
           {status}
         </span>
-        <span className="status-stack" title="Ollama Cloud · OpenAI · Anthropic · Gemini · Groq · OpenRouter · Local">
-          Ollama Cloud · OpenAI · Anthropic · Gemini · Groq · OpenRouter · Local
+        <span className="status-stack" title="Ollama Cloud · OpenAI · Anthropic · Gemini · Groq · OpenRouter · Moonshot · Local">
+          Ollama Cloud · OpenAI · Anthropic · Gemini · Groq · OpenRouter · Moonshot · Local
         </span>
       </footer>
     </div>
@@ -474,7 +474,36 @@ function SettingsView({
   const [draft, setDraft] = useState(settings)
   const [keys, setKeys] = useState<Record<string, string>>({})
   const [blenderHits, setBlenderHits] = useState<string[]>([])
+  const [discovered, setDiscovered] = useState<Record<string, string[]>>({})
+  const [refreshing, setRefreshing] = useState(false)
+  const [modelStatus, setModelStatus] = useState('')
+  const discoveryRequest = useRef(0)
   const selected = providers.find((p) => p.id === draft.providerId)
+  const modelOptions = [...new Map<string, Provider['models'][number]>([
+    ...(selected?.models || []).map((m) => [m.id, m] as const),
+    ...(discovered[draft.providerId] || []).map((id) => [id, { id, name: id }] as const)
+  ]).values()]
+
+  async function refreshModels() {
+    const request = ++discoveryRequest.current
+    const providerId = draft.providerId
+    setRefreshing(true)
+    setModelStatus('Loading available models…')
+    try {
+      const ids = await window.gcp.providers.discover({
+        providerId,
+        apiKey: keys[providerId] || undefined,
+        baseUrl: draft.customBaseUrl
+      })
+      if (request !== discoveryRequest.current) return
+      setDiscovered((current) => ({ ...current, [providerId]: ids }))
+      setModelStatus(ids.length ? `Loaded ${ids.length} models. Choose one that supports tool calling.` : 'No models returned. You can still enter an exact model ID.')
+    } catch (err) {
+      if (request === discoveryRequest.current) setModelStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (request === discoveryRequest.current) setRefreshing(false)
+    }
+  }
 
   useEffect(() => {
     window.gcp.blender.detect().then(setBlenderHits)
@@ -485,7 +514,7 @@ function SettingsView({
       <div className="kicker">Premium, free to ship</div>
       <h1>Keys, models, Blender.</h1>
       <p className="lede">
-        Ollama Cloud is first-class. Add any OpenAI-compatible provider, Anthropic, Gemini, Groq, or a custom endpoint.
+        Ollama Cloud is first-class. Connect OpenAI, Anthropic, Gemini, Groq, OpenRouter, Moonshot AI, or a custom endpoint.
         API keys are stored with OS encryption.
       </p>
       <div className="settings-grid">
@@ -494,6 +523,9 @@ function SettingsView({
           <select
             value={draft.providerId}
             onChange={(e) => {
+              discoveryRequest.current++
+              setRefreshing(false)
+              setModelStatus('')
               const provider = providers.find((p) => p.id === e.target.value)
               setDraft({
                 ...draft,
@@ -510,15 +542,26 @@ function SettingsView({
           </select>
         </div>
         <div className="field">
-          <label>Model</label>
-          <select value={draft.modelId} onChange={(e) => setDraft({ ...draft, modelId: e.target.value })}>
-            {(selected?.models || []).map((m) => (
+          <label htmlFor="provider-model">Model ID</label>
+          <input
+            id="provider-model"
+            list="provider-models"
+            value={draft.providerId === 'custom' ? draft.customModelId : draft.modelId}
+            onChange={(e) => setDraft({ ...draft, [draft.providerId === 'custom' ? 'customModelId' : 'modelId']: e.target.value })}
+            placeholder="Choose or enter the provider’s exact model ID"
+          />
+          <datalist id="provider-models">
+            {modelOptions.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
                 {m.tag ? ` · ${m.tag}` : ''}
               </option>
             ))}
-          </select>
+          </datalist>
+          <button className="ghost" disabled={refreshing} onClick={refreshModels}>
+            {refreshing ? 'Refreshing…' : 'Refresh models'}
+          </button>
+          <div className="help" role="status">{modelStatus || 'Refresh from your provider or enter an exact model ID. World generation requires tool calling.'}</div>
         </div>
         {selected && (
           <div className="field">
@@ -529,7 +572,7 @@ function SettingsView({
               value={keys[selected.id] || ''}
               onChange={(e) => setKeys({ ...keys, [selected.id]: e.target.value })}
             />
-            <div className="help">{selected.keyOptional ? 'Optional for local Ollama.' : selected.keyHint}</div>
+            <div className="help">{selected.keyOptional ? 'Optional for this provider.' : selected.keyHint}</div>
           </div>
         )}
         {draft.providerId === 'custom' && (
@@ -539,13 +582,6 @@ function SettingsView({
               <input
                 value={draft.customBaseUrl}
                 onChange={(e) => setDraft({ ...draft, customBaseUrl: e.target.value })}
-              />
-            </div>
-            <div className="field">
-              <label>Custom model id</label>
-              <input
-                value={draft.customModelId}
-                onChange={(e) => setDraft({ ...draft, customModelId: e.target.value })}
               />
             </div>
           </>
@@ -577,12 +613,13 @@ function SettingsView({
         <div>
           <button
             className="primary"
+            disabled={!(draft.providerId === 'custom' ? draft.customModelId : draft.modelId).trim()}
             onClick={() =>
               onSave({
                 providerId: draft.providerId,
-                modelId: draft.modelId,
+                modelId: draft.modelId.trim(),
                 customBaseUrl: draft.customBaseUrl,
-                customModelId: draft.customModelId,
+                customModelId: draft.customModelId.trim(),
                 blenderPath: draft.blenderPath,
                 maxAgentSteps: draft.maxAgentSteps,
                 temperature: draft.temperature,

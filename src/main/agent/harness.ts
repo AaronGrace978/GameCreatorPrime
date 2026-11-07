@@ -87,7 +87,7 @@ export async function runAgent(options: {
         text: `Step ${step + 1} · ${provider.name} · ${modelId}`
       })
 
-      const { text, toolCalls } = await streamChat(
+      const { text, toolCalls, reasoningContent } = await streamChat(
         {
           baseUrl,
           apiKey,
@@ -108,6 +108,7 @@ export async function runAgent(options: {
       history.push({
         role: 'assistant',
         content: text,
+        reasoningContent,
         toolCalls: toolCalls.length ? toolCalls : undefined
       })
 
