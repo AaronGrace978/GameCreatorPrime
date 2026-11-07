@@ -13,7 +13,7 @@ extraResources:
 win:
   target:
     - nsis
-  artifactName: ${productName}-${version}-setup.${ext}
+  artifactName: GameCreator-Prime-${version}-setup.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
